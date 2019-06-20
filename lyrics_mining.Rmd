@@ -1,0 +1,422 @@
+---
+title: "Lyric Mining"
+author: "David"
+date: "May 30, 2019"
+output: pdf_document
+---
+
+```{r, message = FALSE, warning=FALSE}
+
+# 
+# Source:
+#   Kaggle; GyanendraMishra
+#   Various artists and genres, 380,000+ lyrics from MetroLyrics
+#
+# Sentiment Analysis
+```
+
+
+
+#Library and packages
+```{r}
+library(dplyr)
+library(ggplot2)
+library(tidytext)
+library(readr)
+
+# Would data.table and fread() help here?
+```
+
+
+#Importing the data
+```{r}
+song_lyrics <- read_csv("lyrics.csv")
+
+# fread() would read it faster but some serious memory issues came up at tidy_lyrics.
+# Though using data.tables should be more memory-efficient, I'm unsure how it reacts
+# with the dplyr package.
+
+# First look to see what we have
+glimpse(song_lyrics)
+
+# To do:
+# Unnest lyrics to words
+# Total word counts
+# Sentiment counts
+# Plots, fit model
+#
+# Questions:
+# Has sentiments changed over time ?
+#   -> is it significant ?
+#
+# Which genre uses the fewest words ?
+```
+
+
+```{r}
+
+
+# Unnest the lyrics 
+tidy_lyrics <- song_lyrics %>% 
+  unnest_tokens( word, lyrics)
+
+rm(song_lyrics)
+
+# Each word for a song is now a record instead of the full lyrics as one record
+glimpse(tidy_lyrics)
+
+
+sentiments %>% 
+  group_by(lexicon) %>% 
+  summarize(n_distinct(lexicon))
+
+# Bing sorts words into positive or negative positions.
+# AFINN grades words between -5 and 5 (scaled negative/positive sentiments)
+# NRC lexicon categorizes sentiment words into positive, negative, anger, 
+#   anticipation, disgust, fear, joy, sadness, surprise and trust.
+#
+#
+# Lets choose NRC for now before we scale with AFINN, an overall view of
+# what kind of songs we have. 
+```
+
+
+
+
+#Word totals by song
+```{r}
+
+totals <- tidy_lyrics %>%
+  select(song,genre) %>%
+  # Count by song to find the word totals for each song
+  count(song) %>%
+  # Rename the new column
+  rename(total_words = n)
+
+
+# Print totals    
+glimpse(totals)
+
+lyric_counts <- tidy_lyrics %>%
+  # Combine totals with tidy_lyrics using the "song" column
+  left_join(totals, by = "song")
+
+
+
+# Removed
+rm(totals, tidy_lyrics)
+
+```
+
+
+>>Here<<
+
+
+#Words by Genre
+```{r}
+
+#memory issues
+
+#What genre tends to use a low amount of total words?
+
+
+song_total <- distinct(lyric_counts[, -6])
+  
+q1 <- song_total %>%
+  group_by(genre) %>%
+  summarise(
+    word_total_per_genre = sum(total_words),
+    amount_of_songs = n(),
+    average_word_per_song = word_total_per_genre/amount_of_songs) %>%
+    arrange(desc(average_word_per_song))
+
+# show_query(q1) how to use function?
+
+# Check to see if query working as should
+song_total %>%
+  filter(genre == "Rock") %>%
+  count()
+
+
+
+
+
+q1 %>%
+  ggplot( aes(x = reorder(genre,average_word_per_song), y = average_word_per_song, size = amount_of_songs)) +
+  geom_point( color = "steelblue" ) +
+  coord_flip() +
+  theme_minimal() +
+  theme( panel.grid.major.y = element_blank()	) +
+  labs(title = "Average Amount of Words Used in a Song" , subtitle = "By Genre")
+
+```
+
+#Fewest words
+```{r}
+# What we want:
+# Count of songs by genre
+# When lyric total < 50, 20, 10
+# Visualize this with plots
+
+
+q2 <- song_total %>%
+  filter(total_words < 50) %>%
+  group_by(genre) %>%
+  summarise(
+    word_total_per_genre = sum(total_words),
+    amount_of_songs = n())
+
+par(mrow)
+
+q2 %>%
+  ggplot( aes(x = reorder(genre,word_total_per_genre), y = word_total_per_genre, size = amount_of_songs)) +
+  geom_point( color = "steelblue" ) +
+  coord_flip() +
+  theme_minimal() +
+  theme( panel.grid.major.y = element_blank()	) +
+  labs(title = "Songs With Less Than 50 Words" , subtitle = "By Genre")
+
+# Removed
+rm(totals, tidy_lyrics)
+```
+
+
+
+#Sentiment Count by song (NRC)
+```{r}
+
+lyric_sentiment <- lyric_counts %>%
+    # Sentiment analysis with the "nrc" lexicon
+    inner_join( get_sentiments("nrc"), by = "word" )
+
+# This should help with some memory, neutral words will be taken out and reducing the 
+# records(observations) from 61 million to 15.2 million.
+
+
+# Removed
+rm(lyric_counts)
+
+
+
+lyric_sentiment %>%
+    # How many sentiment words each song has
+    count(song, sentiment, sort = TRUE) %>%
+    head()
+
+
+```
+
+
+################################################################# 
+
+
+
+
+#Negative vs Positive sentiment (NRC)
+```{r}
+
+
+# What songs have the highest proportion of negative words?
+lyric_sentiment %>%
+    # Count by song, sentiment, & total_words
+    count(song, sentiment, total_words) %>%
+    ungroup() %>%
+    # New percent column 
+    mutate(percent = n / total_words) %>%
+    # Filter for only negative words
+    filter(sentiment == "negative") %>%
+    # Arranged by descending percent
+    arrange(desc(percent)) %>%
+    head()
+
+    
+    
+# What songs have the highest proportion of positive words?
+lyric_sentiment %>%
+    count(song, sentiment, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words) %>%
+    filter(sentiment == "positive") %>%
+    arrange(desc(percent)) %>%
+    head()
+
+
+
+
+# Misleading with total_words = 1, lets use 20 as a base of how many total words in a song. 
+# This should exlude a lot of instrumental music.
+
+lyric_sentiment %>%
+    count(song, sentiment, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words) %>%
+    filter(sentiment == "negative", total_words > 20) %>%
+    arrange(desc(percent)) %>%
+    head()
+
+
+
+lyric_sentiment %>%
+    count(song, sentiment, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words) %>%
+    filter(sentiment == "positive", total_words > 20) %>%
+    arrange(desc(percent)) %>%
+    head()
+
+
+
+
+
+
+```
+
+Q:Total words is only 1, are these short audio clips in albums or just instrumental music?
+A:instrumental 
+
+
+
+
+
+
+
+
+
+#Negative vs positive sentiments over time [*Add plot titles, remove outliers from boxplots keep IQR*]
+```{r}
+
+# geom_violin > geom_boxplot
+
+# How is negative sentiment changing over time?
+lyric_sentiment %>%
+    # Filter for only negative words
+    filter(sentiment == "negative") %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words,
+           year = 10 * floor(year / 10)) %>%
+    ggplot( aes(x = as.factor(year), y = percent) ) +
+    geom_boxplot()
+
+# Odd years, okay. Not sure what exactly that might be, early musical period would 
+# include 702 but not 67 and 112.
+
+
+# Blocks of 10-years
+lyric_sentiment %>%
+    filter(sentiment == "negative", total_words > 20, year > 1000) %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words,
+           year = 10 * floor(year / 10)) %>%
+    ggplot( aes(x = as.factor(year), y = percent) ) +
+    geom_boxplot()
+
+
+
+lyric_sentiment %>%
+    filter(sentiment == "negative", total_words > 20, year > 1000) %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words) %>%
+    ggplot( aes(x = as.factor(year), y = percent) ) +
+    geom_boxplot() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+
+
+
+
+
+    
+# How is positive sentiment changing over time?
+
+# Blocks of 10-years
+lyric_sentiment %>%
+    filter(sentiment == "positive", total_words > 20, year > 1000) %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words,
+           year = 10 * floor(year / 10)) %>%
+    ggplot( aes( x = as.factor(year) , y = percent ) ) +
+    geom_boxplot()
+
+
+
+lyric_sentiment %>%
+    filter(sentiment == "positive", total_words > 20, year > 1000) %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    mutate(percent = n / total_words) %>%
+    ggplot( aes( x = as.factor(year) , y = percent ) ) +
+    geom_boxplot() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+
+
+```
+
+
+
+
+#Model Fitting
+```{r}
+
+# Do negative sentiments change over years?
+
+negative_by_year <- lyric_sentiment %>%
+    # Filter for negative words
+    filter(sentiment == "negative") %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    # Percent
+    mutate( percent = n / total_words)
+    
+model_negative <- lm(percent ~ year, data = negative_by_year)
+
+# Results of the model fitting
+summary(model_negative)
+
+
+
+
+# Do positive sentiments change over years?
+
+positive_by_year <- lyric_sentiment %>%
+    # Filter for positive words
+    filter(sentiment == "positive") %>%
+    count(song, year, total_words) %>%
+    ungroup() %>%
+    # Percent
+    mutate( percent = n / total_words)
+
+
+model_positive <- lm(percent ~ year, data = positive_by_year)
+
+# Results of the model fitting
+summary(model_positive)
+
+
+```
+
+Both negative and positive sentiments have significantly changed over the years. Though how should we examine outliers in this kind of a analysis? 
+
+
+
+
+```{r}
+# library(data.table)
+# 
+# 
+# system.time(read_csv("lyrics.csv"))
+# system.time(fread("lyrics.csv"))
+
+# Wow, that's faster
+```
+
+
+
+
+
+
+
